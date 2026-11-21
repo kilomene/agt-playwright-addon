@@ -26,7 +26,10 @@ import json
 import os
 import sys
 
-ADDON = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# realpath, not abspath: AddonStore links this tool into the shared
+# addons/bin, so __file__ must be resolved through the link to anchor
+# at the add-on's own root (same rule as agt-xfce).
+ADDON = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 ADDONS = os.path.dirname(ADDON)
 SHARE = os.path.join(ADDON, "share")
 
