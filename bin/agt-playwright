@@ -1,0 +1,170 @@
+#!/data/data/com.novainc.agt/files/usr/bin/python3
+"""agt-playwright: run Playwright (playwright-core) against the
+Chromium add-on's browser, on the phone.
+
+Modes:
+  - If the calling agent has a live XFCE desktop session, the browser
+    runs headed on that agent's display, so the owner can watch it in
+    the live view.
+  - Otherwise it runs headless.
+
+Usage:
+  agt-playwright run [--agent <slug>] [--headed|--headless] <script.js> [args...]
+  agt-playwright smoke [--agent <slug>] [--headed] [--shot <path>]
+  agt-playwright version
+
+Agent scripts use playwright-core normally and launch with:
+  chromium.launch({ executablePath: process.env.AGT_CHROMIUM_BIN,
+                    headless: process.env.AGT_PW_HEADED !== '1' })
+NODE_PATH is set so require('playwright-core') resolves to this
+add-on. No browser is ever downloaded: PLAYWRIGHT_BROWSERS_PATH
+points at an empty dir inside this add-on and the only browser used
+is the chromium add-on's.
+"""
+
+import json
+import os
+import sys
+
+ADDON = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ADDONS = os.path.dirname(ADDON)
+SHARE = os.path.join(ADDON, "share")
+
+
+def find_chromium():
+    env = os.environ.get("AGT_CHROMIUM_BIN")
+    if env and os.path.isfile(env):
+        return env
+    base = os.path.join(ADDONS, "chromium")
+    for cand in (
+        os.path.join(base, "lib", "chromium", "chrome"),
+        os.path.join(base, "lib", "chromium", "headless_shell"),
+        os.path.join(base, "chrome"),
+        os.path.join(base, "bin", "chrome"),
+    ):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def find_display(agent):
+    """Return ':N' for the agent's live XFCE session, or None."""
+    if not agent:
+        return None
+    state = os.path.join(ADDONS, "xfce", "state")
+    try:
+        with open(os.path.join(state, "by-agent", agent + ".json")) as f:
+            token = json.load(f).get("token")
+        if not token:
+            return None
+        with open(os.path.join(state, "sessions", token + ".json")) as f:
+            rec = json.load(f)
+        disp = rec.get("display")
+        return ":%d" % disp if isinstance(disp, int) else None
+    except Exception:
+        return None
+
+
+def build_env(agent, headed_flag):
+    """headed_flag: True, False, or None (auto). Returns (env, headed)."""
+    env = dict(os.environ)
+    env["NODE_PATH"] = SHARE + (os.pathsep + env["NODE_PATH"] if env.get("NODE_PATH") else "")
+    env["PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"] = "1"
+    empty_browsers = os.path.join(SHARE, ".browsers")
+    os.makedirs(empty_browsers, exist_ok=True)
+    env["PLAYWRIGHT_BROWSERS_PATH"] = empty_browsers
+    chrome = find_chromium()
+    if chrome:
+        env["AGT_CHROMIUM_BIN"] = chrome
+    display = find_display(agent)
+    if headed_flag is True:
+        headed = True
+    elif headed_flag is False:
+        headed = False
+    else:
+        headed = display is not None
+    if headed:
+        if not display:
+            print("agt-playwright: headed requested but agent '%s' has no live XFCE session" % (agent or "?"), file=sys.stderr)
+            sys.exit(3)
+        env["DISPLAY"] = display
+    env["AGT_PW_HEADED"] = "1" if headed else "0"
+    return env, headed
+
+
+def parse_opts(argv):
+    agent = os.environ.get("AGT_AGENT")
+    headed = None
+    rest = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--agent" and i + 1 < len(argv):
+            agent = argv[i + 1]
+            i += 2
+        elif a == "--headed":
+            headed = True
+            i += 1
+        elif a == "--headless":
+            headed = False
+            i += 1
+        else:
+            rest.append(a)
+            i += 1
+    return agent, headed, rest
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd = argv[0]
+
+    if cmd == "version":
+        try:
+            with open(os.path.join(SHARE, "playwright-core", "package.json")) as f:
+                ver = json.load(f).get("version")
+        except Exception:
+            ver = "unknown"
+        chrome = find_chromium()
+        print("playwright-core %s" % ver)
+        print("chromium: %s" % (chrome or "NOT INSTALLED (chromium add-on missing)"))
+        return 0
+
+    if cmd == "run":
+        agent, headed_flag, rest = parse_opts(argv[1:])
+        if not rest:
+            print("agt-playwright: run needs a script path", file=sys.stderr)
+            return 2
+        if not find_chromium():
+            print("agt-playwright: chromium add-on is not installed", file=sys.stderr)
+            return 4
+        env, headed = build_env(agent, headed_flag)
+        print("agt-playwright: %s mode, DISPLAY=%s" % ("headed" if headed else "headless", env.get("DISPLAY", "-")), file=sys.stderr)
+        os.execvpe("node", ["node", rest[0]] + rest[1:], env)
+
+    if cmd == "smoke":
+        agent, headed_flag, rest = parse_opts(argv[1:])
+        shot = os.path.join(os.getcwd(), "pw-smoke.png")
+        j = 0
+        while j < len(rest):
+            if rest[j] == "--shot" and j + 1 < len(rest):
+                shot = rest[j + 1]
+                j += 2
+            else:
+                j += 1
+        if not find_chromium():
+            print("agt-playwright: chromium add-on is not installed", file=sys.stderr)
+            return 4
+        env, headed = build_env(agent, headed_flag)
+        env["AGT_PW_SHOT"] = shot
+        print("agt-playwright: smoke in %s mode, DISPLAY=%s, shot=%s" % ("headed" if headed else "headless", env.get("DISPLAY", "-"), shot), file=sys.stderr)
+        os.execvpe("node", ["node", os.path.join(SHARE, "smoke.js")], env)
+
+    print("agt-playwright: unknown command '%s'" % cmd, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
