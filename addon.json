@@ -1,1 +1,1 @@
-{"bin":["agt-playwright"],"description":"Playwright browser automation for agents: drives the Chromium add-on, headed on the agent's XFCE desktop when a session is live, headless otherwise","id":"playwright","name":"Playwright","version":"0.1.1"}
+{"bin":["agt-playwright"],"description":"Playwright browser automation for agents: drives the AGT Browser add-on, headed on the agent's XFCE desktop when a session is live, headless otherwise","id":"playwright","name":"Playwright","version":"0.1.2"}
