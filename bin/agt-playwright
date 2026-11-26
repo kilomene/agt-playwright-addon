@@ -1,6 +1,7 @@
 #!/data/data/com.novainc.agt/files/usr/bin/python3
 """agt-playwright: run Playwright (playwright-core) against the
-Chromium add-on's browser, on the phone.
+AGT Browser add-on (falling back to the legacy chromium add-on),
+on the phone.
 
 Modes:
   - If the calling agent has a live XFCE desktop session, the browser
@@ -19,7 +20,8 @@ Agent scripts use playwright-core normally and launch with:
 NODE_PATH is set so require('playwright-core') resolves to this
 add-on. No browser is ever downloaded: PLAYWRIGHT_BROWSERS_PATH
 points at an empty dir inside this add-on and the only browser used
-is the chromium add-on's.
+is the AGT Browser add-on's (via its launcher, which sets up the
+library path, X socket bridge and fonts).
 """
 
 import json
@@ -38,6 +40,12 @@ def find_chromium():
     env = os.environ.get("AGT_CHROMIUM_BIN")
     if env and os.path.isfile(env):
         return env
+    # AGT Browser add-on: drive its launcher script, not the raw
+    # binary, so the launch inherits the launcher's library path,
+    # X socket bridge, fontconfig and default flags.
+    cand = os.path.join(ADDONS, "agt-browser", "bin", "agt-browser")
+    if os.path.isfile(cand):
+        return cand
     base = os.path.join(ADDONS, "chromium")
     for cand in (
         os.path.join(base, "lib", "chromium", "chrome"),
@@ -132,7 +140,7 @@ def main():
             ver = "unknown"
         chrome = find_chromium()
         print("playwright-core %s" % ver)
-        print("chromium: %s" % (chrome or "NOT INSTALLED (chromium add-on missing)"))
+        print("chromium: %s" % (chrome or "NOT INSTALLED (no browser add-on found)"))
         return 0
 
     if cmd == "run":
@@ -141,7 +149,7 @@ def main():
             print("agt-playwright: run needs a script path", file=sys.stderr)
             return 2
         if not find_chromium():
-            print("agt-playwright: chromium add-on is not installed", file=sys.stderr)
+            print("agt-playwright: no browser add-on is installed (agt-browser or chromium)", file=sys.stderr)
             return 4
         env, headed = build_env(agent, headed_flag)
         print("agt-playwright: %s mode, DISPLAY=%s" % ("headed" if headed else "headless", env.get("DISPLAY", "-")), file=sys.stderr)
@@ -158,7 +166,7 @@ def main():
             else:
                 j += 1
         if not find_chromium():
-            print("agt-playwright: chromium add-on is not installed", file=sys.stderr)
+            print("agt-playwright: no browser add-on is installed (agt-browser or chromium)", file=sys.stderr)
             return 4
         env, headed = build_env(agent, headed_flag)
         env["AGT_PW_SHOT"] = shot
